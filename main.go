@@ -140,8 +140,8 @@ Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
 	if newFound {
 		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" +
 			strings.Join(messageLines, "\n\n"))
-	} //else {
-		//sendTelegram("✅ " + acc.Name + " — новых домашних заданий нет")
+	} // else {
+	//sendTelegram("✅ " + acc.Name + " — новых домашних заданий нет")
 	//}
 }
 
