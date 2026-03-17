@@ -96,6 +96,7 @@ func checkAccount(acc Account, db *sql.DB) {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 	var homeworks []Homework
+	log.Println("Использую новые флаги браузера")
 
 	err := chromedp.Run(ctx,
 		chromedp.Evaluate(`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`, nil),
