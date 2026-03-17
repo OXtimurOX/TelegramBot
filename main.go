@@ -79,23 +79,19 @@ func main() {
 }
 
 func checkAccount(acc Account, db *sql.DB) {
+	// Создаем опции запуска
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.WindowSize(1920, 1080),
+		chromedp.NoSandbox,
+		chromedp.DisableGPU,
+		chromedp.Headless,
+		// Указываем путь, который мы задали в Dockerfile
+		chromedp.ExecPath("/usr/bin/chromium-browser"),
 	)
-
-	chromeBin := os.Getenv("CHROME_BIN")
-	if chromeBin != "" {
-		opts = append(opts, chromedp.ExecPath(chromeBin))
-	}
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
+	// Далее используй allocCtx для создания обычного контекста
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
