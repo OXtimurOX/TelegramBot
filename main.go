@@ -79,22 +79,22 @@ func main() {
 }
 
 func checkAccount(acc Account, db *sql.DB) {
-	// Создаем опции запуска
+	// Настраиваем параметры запуска браузера специально для Railway/Docker
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,
-		chromedp.DisableGPU,
-		chromedp.Headless,
-		// Указываем путь, который мы задали в Dockerfile
-		chromedp.ExecPath("/usr/bin/chromium-browser"),
+		chromedp.NoSandbox,                             // Обязательно для Docker
+		chromedp.DisableGPU,                            // Отключаем графику
+		chromedp.Headless,                              // Без видимого окна
+		chromedp.Flag("disable-dev-shm-usage", true),   // КРИТИЧНО: решает проблему с памятью в Docker
+		chromedp.ExecPath("/usr/bin/chromium-browser"), // Путь к браузеру в Alpine
 	)
 
+	// Создаем аллокатор с этими опциями
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	// Далее используй allocCtx для создания обычного контекста
+	// Создаем контекст самой вкладки браузера
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-
 	var homeworks []Homework
 
 	err := chromedp.Run(ctx,
