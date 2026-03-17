@@ -2,7 +2,10 @@ module mybot
 
 go 1.24
 
-require github.com/chromedp/chromedp v0.14.2
+require (
+	github.com/chromedp/chromedp v0.14.2
+	github.com/lib/pq v1.11.2
+)
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327 // indirect

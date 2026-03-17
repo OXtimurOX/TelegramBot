@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	_ "github.com/lib/pq"
 )
 
 type Account struct {
@@ -26,14 +27,38 @@ type Homework struct {
 	Type string `json:"type"`
 }
 
-type Storage map[string][]string
-
-const (
-	botToken = "8396719135:AAG3k-GI3jU0RnyHrRUMzQ-YsSDHILOdKUw"
-	chatID   = "1470084510"
-)
-
 func main() {
+	// Поднимаем веб-сервер для Railway
+	go func() {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		http.ListenAndServe(":"+port, nil)
+	}()
+
+	// Подключаемся к PostgreSQL
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("Ошибка: Переменная DATABASE_URL не задана")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("Не удалось подключиться к БД:", err)
+	}
+	defer db.Close()
+
+	// Автоматически создаем таблицу, если её еще нет
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS saved_homeworks (
+  account VARCHAR(100),
+  link TEXT,
+  UNIQUE(account, link)
+ );`)
+	if err != nil {
+		log.Fatal("Ошибка создания таблицы:", err)
+	}
+
 	accounts := []Account{
 		{"matmasha.VESNA11@mail.ru", "goel2026", "Account1", "https://pl.el-ed.ru/clan/5161/homeworks"},
 		{"matmasha.VESNA10@mail.ru", "goel2026", "Account2", "https://pl.el-ed.ru/clan/5164/homeworks"},
@@ -44,30 +69,29 @@ func main() {
 	for {
 		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
 
-		storage := loadStorage()
-
 		for _, acc := range accounts {
-			checkAccount(acc, storage)
+			checkAccount(acc, db)
 		}
-
-		saveStorage(storage)
 
 		fmt.Println("Ждём 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
 }
 
-func checkAccount(acc Account, storage Storage) {
+func checkAccount(acc Account, db *sql.DB) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1920, 1080),
-		// chromedp.Flag("disable-gpu", true),
-		// chromedp.Flag("enable-automation", false),
-		// chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
+
+	chromeBin := os.Getenv("CHROME_BIN")
+	if chromeBin != "" {
+		opts = append(opts, chromedp.ExecPath(chromeBin))
+	}
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
@@ -97,71 +121,56 @@ func checkAccount(acc Account, storage Storage) {
 		chromedp.Reload(),
 		chromedp.Sleep(10*time.Second),
 		chromedp.Evaluate(`
-Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
- const blocks = Array.from(a.querySelectorAll('div'));
- return {
-  link: a.getAttribute("href"),
-  type: blocks.map(b => b.innerText).join(" ")
- }
-})
+   Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
+    const blocks = Array.from(a.querySelectorAll('div'));
+    return {
+     link: a.getAttribute("href"),
+     type: blocks.map(b => b.innerText).join(" ")
+    }
+   })
   `, &homeworks),
 	)
 	if err != nil {
-		log.Println("Ошибка:", err)
+		log.Println("Ошибка парсинга:", err)
 		sendTelegram("❌ " + acc.Name + " — ошибка входа")
 		return
 	}
 
 	fmt.Println("Найдено карточек:", len(homeworks))
-
 	newFound := false
 	var messageLines []string
 
 	for _, hw := range homeworks {
-
-		fmt.Println("Проверяем:", hw.Link)
-		fmt.Println("Текст:", hw.Type)
-
 		if strings.Contains(hw.Type, "Пробник, математика") ||
 			strings.Contains(hw.Type, "Первая часть, математика") ||
 			strings.Contains(hw.Type, "Первая и вторая части, математика") {
 
-			if !contains(storage[acc.Name], hw.Link) {
-
+			// Пытаемся записать ДЗ в базу. Если такая ссылка уже есть, сработает DO NOTHING
+			res, err := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, hw.Link)
+			if err != nil {
+				log.Println("Ошибка БД:", err)
+				continue
+			}
+			// Проверяем, добавилась ли новая строка
+			affected, _ := res.RowsAffected()
+			if affected > 0 {
 				newFound = true
-				storage[acc.Name] = append(storage[acc.Name], hw.Link)
-
-				messageLines = append(messageLines,
-					"🔹 "+hw.Type+"\nhttps://pl.el-ed.ru"+hw.Link)
+				messageLines = append(messageLines, "🔹 "+hw.Type+"\nhttps://pl.el-ed.ru"+hw.Link)
 			}
 		}
 	}
 
 	if newFound {
-		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" +
-			strings.Join(messageLines, "\n\n"))
-	} // else {
-	//sendTelegram("✅ " + acc.Name + " — новых домашних заданий нет")
-	//}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" + strings.Join(messageLines, "\n\n"))
 	}
-	return false
 }
 
 func sendTelegram(message string) {
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+
 	escaped := url.QueryEscape(message)
-	apiURL := fmt.Sprintf(
-		"https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s",
-		botToken,
-		chatID,
-		escaped,
-	)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, escaped)
 
 	resp, err := http.Get(apiURL)
 	if err != nil {
@@ -169,19 +178,4 @@ func sendTelegram(message string) {
 		return
 	}
 	defer resp.Body.Close()
-}
-
-func loadStorage() Storage {
-	file, err := os.ReadFile("storage.json")
-	if err != nil {
-		return make(Storage)
-	}
-	var storage Storage
-	json.Unmarshal(file, &storage)
-	return storage
-}
-
-func saveStorage(storage Storage) {
-	data, _ := json.MarshalIndent(storage, "", "  ")
-	os.WriteFile("storage.json", data, 0644)
 }
