@@ -1,29 +1,23 @@
-FROM golang:1.24-alpine AS builder
-
-# Устанавливаем зависимости для сборки
-RUN apk add --no-cache git
-
+FROM golang:1.24 AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
 RUN go build -o main .
 
-# Финальный образ с Chrome
-FROM alpine:latest
-RUN apk add --no-cache \
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y \
     chromium \
-    chromium-chromedriver \
-    harfbuzz \
-    nss \
-    freetype \
-    ttf-freefont
+    ca-certificates \
+    fonts-liberation \
+    libnss3 \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app/main .
 
-# Указываем путь к Chrome для библиотеки chromedp
-ENV CHROME_BIN=/usr/bin/chromium-browser
+# В Debian путь обычно такой
+ENV CHROME_BIN=/usr/bin/chromium
 
 CMD ["./main"]

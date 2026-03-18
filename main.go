@@ -28,7 +28,6 @@ type Homework struct {
 }
 
 func main() {
-	// Поднимаем веб-сервер для Railway
 	go func() {
 		port := os.Getenv("PORT")
 		if port == "" {
@@ -37,7 +36,6 @@ func main() {
 		http.ListenAndServe(":"+port, nil)
 	}()
 
-	// Подключаемся к PostgreSQL
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("Ошибка: Переменная DATABASE_URL не задана")
@@ -49,7 +47,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Автоматически создаем таблицу, если её еще нет
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS saved_homeworks (
   account VARCHAR(100),
   link TEXT,
@@ -68,57 +65,51 @@ func main() {
 
 	for {
 		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
-
 		for _, acc := range accounts {
 			checkAccount(acc, db)
+			time.Sleep(5 * time.Second) // Даем серверу "выдохнуть" между аккаунтами
 		}
-
 		fmt.Println("Ждём 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
 }
 
 func checkAccount(acc Account, db *sql.DB) {
-	// Настраиваем параметры запуска браузера специально для Railway/Docker
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,                             // Обязательно для Docker
-		chromedp.DisableGPU,                            // Отключаем графику
-		chromedp.Headless,                              // Без видимого окна
-		chromedp.Flag("disable-dev-shm-usage", true),   // КРИТИЧНО: решает проблему с памятью в Docker
+		chromedp.NoSandbox,
+		chromedp.DisableGPU,
+		chromedp.Headless,
+		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
-        chromedp.Flag("no-zygote", true),
-        chromedp.Flag("single-process", true),
-		chromedp.ExecPath("/usr/bin/chromium-browser"), // Путь к браузеру в Alpine
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("single-process", true),
 	)
 
-	// Создаем аллокатор с этими опциями
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancelAlloc()
 
-	// Создаем контекст самой вкладки браузера
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
+	// Тайм-аут на всю операцию 3 минуты, чтобы не висело вечно
+	ctx, cancelCtx := chromedp.NewContext(allocCtx)
+	defer cancelCtx()
+
+	timeCtx, cancelTime := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancelTime()
+
 	var homeworks []Homework
-	log.Println("Использую новые флаги браузера")
+	log.Printf("[%s] Запуск браузера...", acc.Name)
 
-	err := chromedp.Run(ctx,
+	err := chromedp.Run(timeCtx,
 		chromedp.Evaluate(`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`, nil),
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
-		chromedp.Sleep(8*time.Second),
-
+		chromedp.Sleep(5*time.Second),
 		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
 		chromedp.Sleep(2*time.Second),
-
 		chromedp.Click(`//button[contains(text(),"Войти по почте")]`, chromedp.BySearch),
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
-
 		chromedp.Sleep(5*time.Second),
-
 		chromedp.Navigate(acc.HomeworkURL),
-		chromedp.Sleep(7*time.Second),
-		chromedp.Reload(),
 		chromedp.Sleep(10*time.Second),
 		chromedp.Evaluate(`
    Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
@@ -131,27 +122,22 @@ func checkAccount(acc Account, db *sql.DB) {
   `, &homeworks),
 	)
 	if err != nil {
-		log.Println("Ошибка парсинга:", err)
-		sendTelegram("❌ " + acc.Name + " — ошибка входа")
+		log.Printf("[%s] Ошибка: %v", acc.Name, err)
 		return
 	}
 
-	fmt.Println("Найдено карточек:", len(homeworks))
 	newFound := false
 	var messageLines []string
-
 	for _, hw := range homeworks {
 		if strings.Contains(hw.Type, "Пробник, математика") ||
 			strings.Contains(hw.Type, "Первая часть, математика") ||
 			strings.Contains(hw.Type, "Первая и вторая части, математика") {
 
-			// Пытаемся записать ДЗ в базу. Если такая ссылка уже есть, сработает DO NOTHING
 			res, err := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, hw.Link)
 			if err != nil {
-				log.Println("Ошибка БД:", err)
 				continue
 			}
-			// Проверяем, добавилась ли новая строка
+
 			affected, _ := res.RowsAffected()
 			if affected > 0 {
 				newFound = true
@@ -168,14 +154,9 @@ func checkAccount(acc Account, db *sql.DB) {
 func sendTelegram(message string) {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("TELEGRAM_CHAT_ID")
-
-	escaped := url.QueryEscape(message)
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, escaped)
-
-	resp, err := http.Get(apiURL)
-	if err != nil {
-		log.Println("Ошибка Telegram:", err)
-		return
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, url.QueryEscape(message))
+	resp, _ := http.Get(apiURL)
+	if resp != nil {
+		resp.Body.Close()
 	}
-	defer resp.Body.Close()
 }
