@@ -95,7 +95,7 @@ func main() {
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
-	timeCtx, cancelTime := context.WithTimeout(ctx, 2*time.Minute)
+	timeCtx, cancelTime := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancelTime()
 
 	var homeworks []Homework
