@@ -62,19 +62,6 @@ func main() {
 		{"matsashaVESNA11@mail.ru", "goel2026", "Account3", "https://pl.el-ed.ru/clan/5165/homeworks"},
 		{"matsashaVESNA10@mail.ru", "goel2026", "Account4", "https://pl.el-ed.ru/clan/5167/homeworks"},
 	}
-
-	for {
-		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
-		for _, acc := range accounts {
-			checkAccount(acc, db)
-			time.Sleep(5 * time.Second) // Даем серверу "выдохнуть" между аккаунтами
-		}
-		fmt.Println("Ждём 10 минут...")
-		time.Sleep(10 * time.Minute)
-	}
-}
-
-func checkAccount(acc Account, db *sql.DB) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
@@ -93,11 +80,22 @@ func checkAccount(acc Account, db *sql.DB) {
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancelAlloc()
 
-	// Тайм-аут на всю операцию 3 минуты, чтобы не висело вечно
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
 	defer cancelCtx()
 
-	timeCtx, cancelTime := context.WithTimeout(ctx, 3*time.Minute)
+	for {
+		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
+		for _, acc := range accounts {
+			checkAccount(ctx, acc, db)
+			time.Sleep(10 * time.Second)
+		}
+		fmt.Println("Ждём 10 минут...")
+		time.Sleep(10 * time.Minute)
+	}
+}
+
+func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
+	timeCtx, cancelTime := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancelTime()
 
 	var homeworks []Homework
