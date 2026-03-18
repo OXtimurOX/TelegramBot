@@ -85,6 +85,9 @@ func checkAccount(acc Account, db *sql.DB) {
 		chromedp.DisableGPU,                            // Отключаем графику
 		chromedp.Headless,                              // Без видимого окна
 		chromedp.Flag("disable-dev-shm-usage", true),   // КРИТИЧНО: решает проблему с памятью в Docker
+		chromedp.Flag("disable-setuid-sandbox", true),
+        chromedp.Flag("no-zygote", true),
+        chromedp.Flag("single-process", true),
 		chromedp.ExecPath("/usr/bin/chromium-browser"), // Путь к браузеру в Alpine
 	)
 
