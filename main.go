@@ -79,10 +79,10 @@ func checkAccount(acc Account, db *sql.DB) {
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
+		chromedp.ExecPath("/usr/bin/chromium"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("no-zygote", true),
-		chromedp.Flag("single-process", true),
 	)
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -103,7 +103,7 @@ func checkAccount(acc Account, db *sql.DB) {
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
 		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(5*time.Second),
 		chromedp.Click(`//button[contains(text(),"Войти по почте")]`, chromedp.BySearch),
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
