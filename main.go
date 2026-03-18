@@ -83,6 +83,11 @@ func checkAccount(acc Account, db *sql.DB) {
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.WindowSize(1920, 1080),
 	)
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
