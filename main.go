@@ -24,7 +24,7 @@ type Account struct {
 
 type Homework struct {
 	Link string `json:"link"`
-	Text string `json:"text"`
+	Type string `json:"type"`
 }
 
 func main() {
@@ -37,13 +37,24 @@ func main() {
 	}()
 
 	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("Ошибка: Переменная DATABASE_URL не задана")
+	}
+
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Не удалось подключиться к БД:", err)
 	}
 	defer db.Close()
 
-	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS saved_homeworks (account VARCHAR(100), link TEXT, UNIQUE(account, link));`)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS saved_homeworks (
+  account VARCHAR(100),
+  link TEXT,
+  UNIQUE(account, link)
+ );`)
+	if err != nil {
+		log.Fatal("Ошибка создания таблицы:", err)
+	}
 
 	accounts := []Account{
 		{"matmasha.VESNA11@mail.ru", "goel2026", "Account1", "https://pl.el-ed.ru/clan/5161/homeworks"},
@@ -51,59 +62,66 @@ func main() {
 		{"matsashaVESNA11@mail.ru", "goel2026", "Account3", "https://pl.el-ed.ru/clan/5165/homeworks"},
 		{"matsashaVESNA10@mail.ru", "goel2026", "Account4", "https://pl.el-ed.ru/clan/5167/homeworks"},
 	}
-
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
+		chromedp.ExecPath("/usr/bin/chromium"),
 		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(1920, 1080),
 	)
 
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancelAlloc()
+
+	ctx, cancelCtx := chromedp.NewContext(allocCtx)
+	defer cancelCtx()
+
 	for {
-		fmt.Println("--- Цикл проверки:", time.Now().Format("15:04:05"), "---")
+		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
 		for _, acc := range accounts {
-			allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-			ctx, cancelCtx := chromedp.NewContext(allocCtx)
 			checkAccount(ctx, acc, db)
-			cancelCtx()
-			cancelAlloc()
 			time.Sleep(10 * time.Second)
 		}
+		fmt.Println("Ждём 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
-	timeCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
-	defer cancel()
+	timeCtx, cancelTime := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancelTime()
 
 	var homeworks []Homework
-	log.Printf("[%s] Захожу на платформу...", acc.Name)
+	log.Printf("[%s] Запуск браузера...", acc.Name)
 
 	err := chromedp.Run(timeCtx,
+		chromedp.Evaluate(`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`, nil),
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
-		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
-		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
-		chromedp.WaitVisible(`input[type="email"]`),
+		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
+		chromedp.Sleep(5*time.Second),
+		chromedp.Click(`//button[contains(text(),"Войти по почте")]`, chromedp.BySearch),
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
-		chromedp.Sleep(10*time.Second),
+		chromedp.Sleep(5*time.Second),
 		chromedp.Navigate(acc.HomeworkURL),
-		chromedp.Sleep(15*time.Second),
-		// Ищем ссылки ТОЛЬКО в таблице (обычно это тег table или main область)
-		// Собираем текст из соседних ячеек, чтобы точно поймать "Тип д/з"
+		chromedp.Sleep(10*time.Second),
 		chromedp.Evaluate(`
-   Array.from(document.querySelectorAll('tr')).map(tr => {
-    const link = tr.querySelector('a');
+   Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
+    const blocks = Array.from(a.querySelectorAll('div'));
     return {
-     link: link ? link.getAttribute("href") : "",
-     text: tr.innerText.replace(/\s+/g, ' ').trim()
+     link: a.getAttribute("href"),
+     type: blocks.map(b => b.innerText).join(" ")
     }
-   }).filter(h => h.link !== "")
+   })
   `, &homeworks),
 	)
 	if err != nil {
@@ -112,54 +130,36 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	}
 
 	newFound := false
-	var msg []string
+	var messageLines []string
 	for _, hw := range homeworks {
-		t := strings.ToLower(hw.Text)
-
-		// Игнорируем ссылки из бокового меню (там обычно /clan/ или /course/)
-		if strings.Contains(hw.Link, "/clan/") && !strings.Contains(hw.Link, "homework") {
-			continue
-		}
-
-		// Теперь фильтр жесткий: должна быть математика И (пробник ИЛИ часть ИЛИ уровень)
-		// Это отсечет названия курсов в меню
-		if strings.Contains(t, "математика") && (strings.Contains(t, "часть") || strings.Contains(t, "пробник")) {
+		if strings.Contains(hw.Type, "Пробник, математика") ||
+			strings.Contains(hw.Type, "Первая часть, математика") ||
+			strings.Contains(hw.Type, "Первая и вторая части, математика") {
 
 			res, err := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, hw.Link)
 			if err != nil {
 				continue
 			}
 
-			aff, _ := res.RowsAffected()
-			if aff > 0 {
+			affected, _ := res.RowsAffected()
+			if affected > 0 {
 				newFound = true
-				full := hw.Link
-				if !strings.HasPrefix(full, "http") {
-					full = "https://pl.el-ed.ru" + full
-				}
-
-				// Вытаскиваем только название урока из длинной строки таблицы
-
-				parts := strings.Split(hw.Text, "  ")
-				title := hw.Text
-				if len(parts) > 2 {
-					title = parts[2]
-				} // Обычно название урока в 3-й колонке
-
-				msg = append(msg, "🔹 "+title+"\n"+full)
-				log.Printf("[%s] НАШЕЛ: %s", acc.Name, title)
+				messageLines = append(messageLines, "🔹 "+hw.Type+"\nhttps://pl.el-ed.ru"+hw.Link)
 			}
 		}
 	}
 
 	if newFound {
-		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ из таблицы:\n\n" + strings.Join(msg, "\n\n"))
-	} else {
-		log.Printf("[%s] В таблице ничего нового", acc.Name)
+		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" + strings.Join(messageLines, "\n\n"))
 	}
 }
 
 func sendTelegram(message string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("TELEGRAM_CHAT_ID"), url.QueryEscape(message))
-	http.Get(apiURL)
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, url.QueryEscape(message))
+	resp, _ := http.Get(apiURL)
+	if resp != nil {
+		resp.Body.Close()
+	}
 }
