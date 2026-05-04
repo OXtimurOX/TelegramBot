@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -112,6 +113,25 @@ func makeHash(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
+func normalizeText(s string) string {
+	s = strings.ToLower(s)
+
+	// ❌ Удаляем всё, что связано со временем
+	s = regexp.MustCompile(`\d+\s*$`).ReplaceAllString(s, "") // числа в конце (часы)
+
+	// ❌ Удаляем дату
+	s = regexp.MustCompile(`\d{2}\s+\w+\s+\d{2}:\d{2}`).ReplaceAllString(s, "")
+
+	// ❌ Удаляем статус
+	s = strings.ReplaceAll(s, "ожидает проверки", "")
+	s = strings.ReplaceAll(s, "проверено", "")
+
+	// Убираем лишние пробелы
+	s = strings.TrimSpace(s)
+
+	return s
+}
+
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	timeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -191,7 +211,8 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
 			}
 
 			// 🔥 ВАЖНО: уникальный ключ
-			base := hw.Link + "|" + hw.Text
+			cleanText := normalizeText(hw.Text)
+			base := cleanText
 			dbKey := makeHash(base)
 			res, err := db.Exec(`
 INSERT INTO saved_homeworks (account, link)
