@@ -144,10 +144,16 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 
 			// Поскольку реальной ссылки может не быть (из-за JS-кликов),
 			// мы используем текст самой строки (первые 100 символов) как уникальный ID для базы данных!
-			dbKey := acc.Name + "_" + hw.Text
-			if len(dbKey) > 100 {
-				dbKey = dbKey[:100]
+			// 1. Формируем ссылку из того, что достал парсер
+			finalLink := hw.Link
+			if finalLink == "" || finalLink == "#" || strings.Contains(finalLink, "javascript") {
+				finalLink = acc.HomeworkURL
+			} else if !strings.HasPrefix(finalLink, "http") {
+				finalLink = "https://pl.el-ed.ru" + finalLink
 			}
+
+			// 2. Теперь dbKey будет работать, так как finalLink определена
+			dbKey := finalLink
 
 			res, err := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, dbKey)
 			if err != nil {
