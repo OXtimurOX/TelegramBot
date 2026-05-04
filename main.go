@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -105,6 +107,11 @@ func extractID(link string) string {
 	return parts[len(parts)-1]
 }
 
+func makeHash(s string) string {
+	h := md5.Sum([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	timeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -184,11 +191,8 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
 			}
 
 			// 🔥 ВАЖНО: уникальный ключ
-			dbKey := extractID(hw.Link)
-
-			if dbKey == "" {
-				dbKey = hw.Text // fallback если вдруг нет ссылки
-			}
+			base := hw.Link + "|" + hw.Text
+			dbKey := makeHash(base)
 			res, err := db.Exec(`
 INSERT INTO saved_homeworks (account, link)
 VALUES ($1, $2)
