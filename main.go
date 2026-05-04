@@ -63,36 +63,36 @@ func main() {
 		{"matsashaVESNA10@mail.ru", "goel2026", "Account4", "https://pl.el-ed.ru/clan/5167/homeworks"},
 	}
 
+	// Опции для МАКСИМАЛЬНОЙ экономии памяти
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
-		chromedp.ExecPath("/usr/bin/chromium"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("no-zygote", true),
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("single-process", true), // Запуск в один процесс (экономит ОЗУ)
+		chromedp.Flag("disable-extensions", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.WindowSize(1920, 1080),
 	)
 
 	for {
-		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
-
-		// Создаем браузер и контекст ВНУТРИ цикла, чтобы они обновлялись и не "умирали" навсегда
-		allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-		ctx, cancelCtx := chromedp.NewContext(allocCtx)
+		fmt.Println("=== Запуск цикла проверки:", time.Now().Format("15:04:05"), "===")
 
 		for _, acc := range accounts {
-			checkAccount(ctx, acc, db)
-			time.Sleep(10 * time.Second)
-		}
+			// Для каждого аккаунта СОБСТВЕННЫЙ аллокатор (изоляция)
+			allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+			ctx, cancelCtx := chromedp.NewContext(allocCtx)
 
-		// Очищаем память перед паузой
-		cancelCtx()
-		cancelAlloc()
+			log.Printf("[%s] Начинаю проверку...", acc.Name)
+			checkAccount(ctx, acc, db)
+
+			// Сразу закрываем браузер после одного аккаунта
+			cancelCtx()
+			cancelAlloc()
+
+			time.Sleep(5 * time.Second) // Небольшая пауза между аккаунтами
+		}
 
 		fmt.Println("Ждём 10 минут...")
 		time.Sleep(10 * time.Minute)
@@ -100,25 +100,26 @@ func main() {
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
-	timeCtx, cancelTime := context.WithTimeout(ctx, 3*time.Minute)
+	// Уменьшаем таймаут до 2 минут, чтобы не висеть долго
+	timeCtx, cancelTime := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancelTime()
 
 	var homeworks []Homework
-	log.Printf("[%s] Запуск браузера...", acc.Name)
 
 	err := chromedp.Run(timeCtx,
 		chromedp.Evaluate(`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`, nil),
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
-		chromedp.Sleep(5*time.Second),
+		chromedp.Sleep(3*time.Second),
+		// Используем WaitVisible, чтобы не кликать в пустоту
+		chromedp.WaitVisible(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
 		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
-		chromedp.Sleep(5*time.Second),
 		chromedp.Click(`//button[contains(text(),"Войти по почте")]`, chromedp.BySearch),
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
 		chromedp.Sleep(5*time.Second),
 		chromedp.Navigate(acc.HomeworkURL),
-		chromedp.Sleep(10*time.Second),
+		chromedp.Sleep(5*time.Second),
 		chromedp.Evaluate(`
    Array.from(document.querySelectorAll('a[href^="/homework-done/"]')).map(a => {
     const blocks = Array.from(a.querySelectorAll('div'));
@@ -130,7 +131,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
   `, &homeworks),
 	)
 	if err != nil {
-		log.Printf("[%s] Ошибка: %v", acc.Name, err)
+		log.Printf("[%s] Ошибка выполнения: %v", acc.Name, err)
 		return
 	}
 
@@ -155,15 +156,25 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	}
 
 	if newFound {
+		log.Printf("[%s] Найдено новых ДЗ: %d", acc.Name, len(messageLines))
 		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" + strings.Join(messageLines, "\n\n"))
+	} else {
+		log.Printf("[%s] Новых ДЗ не найдено", acc.Name)
 	}
 }
 
 func sendTelegram(message string) {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	if botToken == "" || chatID == "" {
+		return
+	}
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, url.QueryEscape(message))
-	resp, _ := http.Get(apiURL)
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		log.Printf("Ошибка отправки в TG: %v", err)
+		return
+	}
 	if resp != nil {
 		resp.Body.Close()
 	}
