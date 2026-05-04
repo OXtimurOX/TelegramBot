@@ -37,6 +37,10 @@ func main() {
 	}()
 
 	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is missing")
+	}
+
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
@@ -56,8 +60,10 @@ func main() {
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
-		chromedp.WindowSize(1920, 1080), // Увеличиваем окно
 		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("single-process", true),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
 	)
 
@@ -66,11 +72,14 @@ func main() {
 		for _, acc := range accounts {
 			allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 			ctx, cancelCtx := chromedp.NewContext(allocCtx)
+
 			checkAccount(ctx, acc, db)
+
 			cancelCtx()
 			cancelAlloc()
-			time.Sleep(10 * time.Second)
+			time.Sleep(15 * time.Second)
 		}
+		fmt.Println("Пауза 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
 }
@@ -80,33 +89,40 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	defer cancelTime()
 
 	var homeworks []Homework
-	var pageText string
+	var currentURL string
 
-	log.Printf("[%s] Начинаю процесс...", acc.Name)
+	log.Printf("[%s] Входим в аккаунт...", acc.Name)
 
 	err := chromedp.Run(timeCtx,
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
+		// Кнопка куки
 		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
+		chromedp.Sleep(2*time.Second),
+		// Вход по почте
 		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
 		chromedp.WaitVisible(`input[type="email"]`),
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
-		chromedp.Sleep(15*time.Second), // Ждем подольше после входа
+		chromedp.Sleep(12*time.Second),
 
+		// Переход к ДЗ и принудительная прокрутка
 		chromedp.Navigate(acc.HomeworkURL),
-		chromedp.Sleep(20*time.Second), // Очень долго ждем загрузки списка ДЗ
+		chromedp.Sleep(15*time.Second),
+		chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight)`, nil),
+		chromedp.Sleep(5*time.Second),
 
-		// Берем ВЕСЬ текст страницы для отладки
-		chromedp.Text("body", &pageText),
+		chromedp.Location(&currentURL),
 
-		// Собираем все ссылки, где есть "homework" или цифры ID в конце
+		// Собираем ссылки более агрессивно
 		chromedp.Evaluate(`
-   Array.from(document.querySelectorAll('a')).map(a => ({
-    link: a.getAttribute("href") || "",
-    type: a.innerText.trim()
-   })).filter(h => h.link.includes("homework") || /\d+$/.test(h.link))
+   Array.from(document.querySelectorAll('a')).map(a => {
+    return {
+     link: a.getAttribute("href") || "",
+     type: a.innerText.replace(/\s+/g, ' ').trim()
+    }
+   }).filter(h => h.link.includes("/homework-done/") || h.link.includes("/homework/"))
   `, &homeworks),
 	)
 	if err != nil {
@@ -114,41 +130,55 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		return
 	}
 
-	// Если ссылок 0, выведем в лог первые 500 символов текста страницы
-	if len(homeworks) == 0 {
-		snippet := pageText
-		if len(snippet) > 500 {
-			snippet = snippet[:500]
-		}
-		log.Printf("[%s] Ссылок не нашли. Текст на странице (кусок): %s", acc.Name, snippet)
-	}
+	log.Printf("[%s] На адресе: %s. Найдено ссылок после фильтра: %d", acc.Name, currentURL, len(homeworks))
 
 	newFound := false
 	var msg []string
+
 	for _, hw := range homeworks {
+		// Логируем ВООБЩЕ ВСЁ, что нашли, чтобы понять причину пропуска
+		log.Printf("[%s] Вижу в коде: Текст='%s' | Ссылка='%s'", acc.Name, hw.Type, hw.Link)
+
 		t := strings.ToLower(hw.Type)
-		// Упростим фильтр: если есть "мат" и "часть" или "проб"
-		if strings.Contains(t, "мат") && (strings.Contains(t, "час") || strings.Contains(t, "проб")) {
-			res, _ := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, hw.Link)
+		// Проверяем ключевые слова: математика + (пробник или часть)
+		if strings.
+			Contains(t, "математика") && (strings.Contains(t, "пробник") || strings.Contains(t, "часть")) {
+
+			res, err := db.Exec(`INSERT INTO saved_homeworks (account, link) VALUES ($1, $2) ON CONFLICT DO NOTHING`, acc.Name, hw.Link)
+			if err != nil {
+				log.Printf("[%s] Ошибка БД: %v", acc.Name, err)
+				continue
+			}
+
 			aff, _ := res.RowsAffected()
 			if aff > 0 {
 				newFound = true
 				fullLink := hw.Link
-				if !strings.
-					HasPrefix(fullLink, "http") {
+				if !strings.HasPrefix(fullLink, "http") {
 					fullLink = "https://pl.el-ed.ru" + hw.Link
 				}
 				msg = append(msg, "🔹 "+hw.Type+"\n"+fullLink)
+				log.Printf("[%s] УСПЕХ: Добавлена работа %s", acc.Name, hw.Type)
 			}
 		}
 	}
 
 	if newFound {
 		sendTelegram("🔥 " + acc.Name + "\nНовые ДЗ:\n\n" + strings.Join(msg, "\n\n"))
+	} else {
+		log.Printf("[%s] Новых работ по фильтру не найдено", acc.Name)
 	}
 }
 
 func sendTelegram(message string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("TELEGRAM_CHAT_ID"), url.QueryEscape(message))
-	http.Get(apiURL)
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	if botToken == "" || chatID == "" {
+		return
+	}
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", botToken, chatID, url.QueryEscape(message))
+	resp, _ := http.Get(apiURL)
+	if resp != nil {
+		resp.Body.Close()
+	}
 }
