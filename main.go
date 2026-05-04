@@ -115,8 +115,8 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
 
-		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
+		chromedp.Sleep(4*time.Second),
 
 		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
 		chromedp.WaitVisible(`input[type="email"]`),
