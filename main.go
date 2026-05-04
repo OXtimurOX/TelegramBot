@@ -96,6 +96,15 @@ func main() {
 	}
 }
 
+func extractID(link string) string {
+	if link == "" {
+		return ""
+	}
+
+	parts := strings.Split(link, "/")
+	return parts[len(parts)-1]
+}
+
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 	timeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -175,11 +184,11 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
 			}
 
 			// 🔥 ВАЖНО: уникальный ключ
-			dbKey := hw.Text + "|" + finalLink
-			if len(dbKey) > 300 {
-				dbKey = dbKey[:300]
-			}
+			dbKey := extractID(hw.Link)
 
+			if dbKey == "" {
+				dbKey = hw.Text // fallback если вдруг нет ссылки
+			}
 			res, err := db.Exec(`
 INSERT INTO saved_homeworks (account, link)
 VALUES ($1, $2)
