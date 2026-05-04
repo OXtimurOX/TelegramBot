@@ -50,10 +50,8 @@ func main() {
 	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS saved_homeworks (account VARCHAR(100), link TEXT, UNIQUE(account, link));`)
 
 	accounts := []Account{
-		{"matmasha.VESNA11@mail.ru", "goel2026", "Account1", "https://pl.el-ed.ru/clan/5161/homeworks"},
-		{"matmasha.VESNA10@mail.ru", "goel2026", "Account2", "https://pl.el-ed.ru/clan/5164/homeworks"},
-		{"matsashaVESNA11@mail.ru", "goel2026", "Account3", "https://pl.el-ed.ru/clan/5165/homeworks"},
-		{"matsashaVESNA10@mail.ru", "goel2026", "Account4", "https://pl.el-ed.ru/clan/5167/homeworks"},
+		{"6probnikm@mail.ru", "goelprobe", "Account1", "https://pl.el-ed.ru/clan/5294/homeworks"},
+		{"7probnikm@mail.ru", "goelprobe", "Account2", "https://pl.el-ed.ru/clan/5293/homeworks"},	
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -98,7 +96,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Click(`button[type="submit"]`),
 		chromedp.Sleep(10*time.Second),
 		chromedp.Navigate(acc.HomeworkURL),
-		chromedp.Sleep(15*time.Second), // Даем таблице прогрузиться
+		chromedp.Sleep(20*time.Second), // Даем таблице прогрузиться
 
 		// Скроллим вообще всё, чтобы таблица точно загрузилась
 		chromedp.ActionFunc(func(ctx context.Context) error {
