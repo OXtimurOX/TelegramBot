@@ -69,12 +69,15 @@ func main() {
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
+		chromedp.ExecPath("/usr/bin/chromium"),
 		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("no-zygote", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
-		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"),
+		chromedp.WindowSize(1920, 1080),
 	)
 
 	for {
