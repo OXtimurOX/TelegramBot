@@ -69,6 +69,7 @@ func main() {
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
+		chromedp.ExecPath("/usr/bin/chromium"), // Твой путь для Railway
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("no-zygote", true),
@@ -111,7 +112,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
 
-		// Кликаем куки, если есть (без жесткого ожидания)
+		// Кликаем куки, если есть
 		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
 		chromedp.Sleep(2*time.Second),
 
@@ -128,8 +129,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		// Переходим к домашкам
 		chromedp.Navigate(acc.HomeworkURL),
 
-		// УБРАЛ СТРОЧКУ С ЖЕСТКИМ WAITVISIBLE, которая вешала бота!
-		// Просто спим и даем JS время прогрузить список
+		// Спим и даем JS время прогрузить список
 		chromedp.Sleep(15*time.Second),
 
 		chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight)`, nil),
@@ -138,14 +138,14 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Location(&currentURL),
 		chromedp.OuterHTML("html", &html),
 
-		// Ищем любые ссылки, в которых есть слово work (покроет и homework, и work-don)
+		// БОЛЬШЕ НЕТ ФИЛЬТРА ПО СЛОВУ "WORK" В ССЫЛКЕ! Берем ВСЕ теги <a>
 		chromedp.Evaluate(`
    Array.from(document.querySelectorAll('a')).map(a => {
     return {
      link: a.getAttribute("href") || "",
      type: a.innerText.replace(/\s+/g, ' ').trim()
     }
-   }).filter(h => h.link.includes("work"))
+   })
   `, &homeworks),
 	)
 	if err != nil {
@@ -153,19 +153,27 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		return
 	}
 
-	log.Printf("[%s] URL: %s | Найдено: %d | HTML size: %d",
+	log.Printf("[%s] URL: %s | Всего найдено ссылок (<a>): %d | HTML size: %d",
 		acc.Name, currentURL, len(homeworks), len(html))
 
 	newFound := false
 	var msg []string
 
 	for _, hw := range homeworks {
-
-		log.Printf("[%s] Вижу: %s | %s", acc.Name, hw.Type, hw.Link)
+		// Пропускаем мусорные ссылки (без текста или без адреса)
+		if hw.Type == "" || hw.Link == "" || hw.Link == "#" {
+			continue
+		}
 
 		t := strings.ToLower(hw.Type)
-		if strings.Contains(t, "математика") &&
-			(strings.Contains(t, "пробник") || strings.Contains(t, "часть")) {
+		// Для отладки: если в тексте ссылки вообще есть "мат", пишем в лог
+		if strings.Contains(t, "мат") {
+			log.Printf("[%s] Вижу работу: '%s' | URL: %s", acc.Name, hw.Type, hw.Link)
+		}
+
+		// Наш фильтр по тексту
+		if strings.Contains(t, "мат") &&
+			(strings.Contains(t, "проб") || strings.Contains(t, "час")) {
 
 			res, err := db.Exec(`
 INSERT INTO saved_homeworks (account, link)
