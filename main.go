@@ -69,13 +69,9 @@ func main() {
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
-		chromedp.ExecPath("/usr/bin/chromium"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("no-zygote", true),
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(1920, 1080),
 	)
@@ -96,7 +92,7 @@ func main() {
 			time.Sleep(15 * time.Second) // важно
 		}
 
-		fmt.Println("⏸ Пауза 10 минут...")
+		fmt.Println("⏸️ Пауза 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
 }
@@ -115,9 +111,11 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
 
-		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch),
-		chromedp.Sleep(4*time.Second),
+		// Кликаем куки, если есть (без жесткого ожидания)
+		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
+		chromedp.Sleep(2*time.Second),
 
+		// Логин
 		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
 		chromedp.WaitVisible(`input[type="email"]`),
 
@@ -127,11 +125,12 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 
 		chromedp.Sleep(10*time.Second),
 
+		// Переходим к домашкам
 		chromedp.Navigate(acc.HomeworkURL),
 
-		// ВАЖНО: ждём реальные элементы
-		chromedp.WaitVisible(`a[href*="homework"]`, chromedp.ByQuery),
-		chromedp.Sleep(5*time.Second),
+		// УБРАЛ СТРОЧКУ С ЖЕСТКИМ WAITVISIBLE, которая вешала бота!
+		// Просто спим и даем JS время прогрузить список
+		chromedp.Sleep(15*time.Second),
 
 		chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight)`, nil),
 		chromedp.Sleep(3*time.Second),
@@ -139,16 +138,14 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Location(&currentURL),
 		chromedp.OuterHTML("html", &html),
 
+		// Ищем любые ссылки, в которых есть слово work (покроет и homework, и work-don)
 		chromedp.Evaluate(`
-Array.from(document.querySelectorAll('a')).map(a => {
- return {
-  link: a.getAttribute("href") || "",
-  type: a.innerText.replace(/\s+/g, ' ').trim()
- }
-}).filter(h => 
- h.link.includes("/homework-done/") || 
- h.link.includes("/homework/")
-)
+   Array.from(document.querySelectorAll('a')).map(a => {
+    return {
+     link: a.getAttribute("href") || "",
+     type: a.innerText.replace(/\s+/g, ' ').trim()
+    }
+   }).filter(h => h.link.includes("work"))
   `, &homeworks),
 	)
 	if err != nil {
