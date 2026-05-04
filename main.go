@@ -51,7 +51,7 @@ func main() {
 
 	accounts := []Account{
 		{"6probnikm@mail.ru", "goelprobe", "Account1", "https://pl.el-ed.ru/clan/5294/homeworks"},
-		{"7probnikm@mail.ru", "goelprobe", "Account2", "https://pl.el-ed.ru/clan/5293/homeworks"},	
+		{"7probnikm@mail.ru", "goelprobe", "Account2", "https://pl.el-ed.ru/clan/5293/homeworks"},
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -144,7 +144,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 
 			// Поскольку реальной ссылки может не быть (из-за JS-кликов),
 			// мы используем текст самой строки (первые 100 символов) как уникальный ID для базы данных!
-			dbKey := hw.Text
+			dbKey := acc.Name + "_" + hw.Text
 			if len(dbKey) > 100 {
 				dbKey = dbKey[:100]
 			}
