@@ -62,6 +62,7 @@ func main() {
 		{"matsashaVESNA11@mail.ru", "goel2026", "Account3", "https://pl.el-ed.ru/clan/5165/homeworks"},
 		{"matsashaVESNA10@mail.ru", "goel2026", "Account4", "https://pl.el-ed.ru/clan/5167/homeworks"},
 	}
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
@@ -77,18 +78,22 @@ func main() {
 		chromedp.WindowSize(1920, 1080),
 	)
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancelAlloc()
-
-	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	defer cancelCtx()
-
 	for {
 		fmt.Println("Проверка:", time.Now().Format("15:04:05"))
+
+		// Создаем браузер и контекст ВНУТРИ цикла, чтобы они обновлялись и не "умирали" навсегда
+		allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+		ctx, cancelCtx := chromedp.NewContext(allocCtx)
+
 		for _, acc := range accounts {
 			checkAccount(ctx, acc, db)
 			time.Sleep(10 * time.Second)
 		}
+
+		// Очищаем память перед паузой
+		cancelCtx()
+		cancelAlloc()
+
 		fmt.Println("Ждём 10 минут...")
 		time.Sleep(10 * time.Minute)
 	}
