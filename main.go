@@ -161,8 +161,8 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 
 		// ЖЕСТКИЙ ПОИСК ПО СЛОВАМ В СТРОКЕ
 		txt := hw.Text
-		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат")
-		isProbnik := strings.Contains(txt, "пробник") || strings.Contains(txt, "проб")
+		isMath := strings.Contains(txt, "Пробник, математика")
+		isProbnik := strings.Contains(txt, "Первая и вторая части, математика")
 		isPart := strings.Contains(txt, "часть") || strings.Contains(txt, "части")
 
 		// Ищем совпадение: должна быть Математика + (Пробник ИЛИ Часть)
