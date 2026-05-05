@@ -82,20 +82,28 @@ func main() {
 	for {
 		fmt.Println("=== Старт проверки:", time.Now().Format("15:04:05"), "===")
 
-		for _, acc := range accounts {
-			allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-			ctx, cancelCtx := chromedp.NewContext(allocCtx)
+		allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+		defer cancelAlloc()
 
-			checkAccount(ctx, acc, db)
+		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+		defer cancelBrowser()
 
-			cancelCtx()
-			cancelAlloc()
+		for {
+			fmt.Println("=== Старт проверки:", time.Now().Format("15:04:05"), "===")
 
-			time.Sleep(10 * time.Second)
+			for _, acc := range accounts {
+				ctx, cancel := chromedp.NewContext(browserCtx)
+
+				checkAccount(ctx, acc, db)
+
+				cancel()
+
+				time.Sleep(10 * time.Second)
+			}
+
+			fmt.Println("⏸️ Ждем 1 минуту...")
+			time.Sleep(1 * time.Minute)
 		}
-
-		fmt.Println("⏸️ Ждем 1 минуту...")
-		time.Sleep(1 * time.Minute)
 	}
 }
 
@@ -116,20 +124,22 @@ func makeHash(s string) string {
 func normalizeText(s string) string {
 	s = strings.ToLower(s)
 
-	// ❌ Удаляем всё, что связано со временем
-	s = regexp.MustCompile(`\d+\s*$`).ReplaceAllString(s, "") // числа в конце (часы)
+	// ❌ убираем "63", "64", "65" (часы)
+	reHours := regexp.MustCompile(`\b\d{1,3}\b`)
+	s = reHours.ReplaceAllString(s, "")
 
-	// ❌ Удаляем дату
-	s = regexp.MustCompile(`\d{2}\s+\w+\s+\d{2}:\d{2}`).ReplaceAllString(s, "")
+	// ❌ убираем дату типа "04 мая 15:21"
+	reDate := regexp.MustCompile(`\d{2}\s+\p{L}+\s+\d{2}:\d{2}`)
+	s = reDate.ReplaceAllString(s, "")
 
-	// ❌ Удаляем статус
+	// ❌ убираем статус
 	s = strings.ReplaceAll(s, "ожидает проверки", "")
 	s = strings.ReplaceAll(s, "проверено", "")
 
-	// Убираем лишние пробелы
-	s = strings.TrimSpace(s)
+	// ❌ убираем лишние пробелы
+	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
 
-	return s
+	return strings.TrimSpace(s)
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
