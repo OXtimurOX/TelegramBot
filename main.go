@@ -53,24 +53,38 @@ func main() {
 	defer db.Close()
 
 	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS saved_homeworks (
-		account VARCHAR(100),
-		hash TEXT,
-		UNIQUE(account, hash)
-	);
-	`)
+ CREATE TABLE IF NOT EXISTS saved_homeworks (
+  account VARCHAR(100),
+  link TEXT,
+  UNIQUE(account, link)
+ );`)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	accounts := []Account{
-		// 👉 эти два одному человеку
-		{"6probnikm@mail.ru", "goelprobe", "МАША", "https://pl.el-ed.ru/clan/5294/homeworks", "CHAT_ID_1"},
-		{"7probnikm@mail.ru", "goelprobe", "САША", "https://pl.el-ed.ru/clan/5293/homeworks", "CHAT_ID_1"},
-
-		// 👉 этот другому
-		{"2probnikm@mail.ru", "goelprobe", "АСЯ", "https://pl.el-ed.ru/clan/5298/homeworks", "CHAT_ID_2"},
-	}
+	{
+		"6probnikm@mail.ru",
+		"goelprobe",
+		"МАША",
+		"https://pl.el-ed.ru/clan/5294/homeworks",
+		os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 первый человек
+	},
+	{
+		"7probnikm@mail.ru",
+		"goelprobe",
+		"САША",
+		"https://pl.el-ed.ru/clan/5293/homeworks",
+		os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 второй человек
+	},
+	{
+		"2probnikm@mail.ru",
+		"goelprobe",
+		"AСЯЯЯ",
+		"https://pl.el-ed.ru/clan/5298/homeworks",
+		os.Getenv("TELEGRAM_CHAT_ID_2"), // 👈 второй человек
+	},
+}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
@@ -82,59 +96,70 @@ func main() {
 		chromedp.Flag("disable-extensions", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(1920, 1080),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"),
 	)
-
-	// ✅ один браузер
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancelAlloc()
-
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer cancelBrowser()
 
 	for {
 		fmt.Println("=== Старт проверки:", time.Now().Format("15:04:05"), "===")
 
-		for _, acc := range accounts {
-			ctx, cancel := chromedp.NewContext(browserCtx)
+		allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+		defer cancelAlloc()
 
-			checkAccount(ctx, acc, db)
+		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+		defer cancelBrowser()
 
-			cancel()
+		for {
+			fmt.Println("=== Старт проверки:", time.Now().Format("15:04:05"), "===")
 
-			time.Sleep(10 * time.Second)
+			for _, acc := range accounts {
+				ctx, cancel := chromedp.NewContext(browserCtx)
+
+				checkAccount(ctx, acc, db)
+
+				cancel()
+
+				time.Sleep(10 * time.Second)
+			}
+
+			fmt.Println("⏸️ Ждем 5 минут...")
+			time.Sleep(5 * time.Minute)
 		}
-
-		fmt.Println("⏸️ Ждем 5 минут...")
-		time.Sleep(5 * time.Minute)
 	}
 }
 
-// 🔥 УБИРАЕМ ЧАСЫ / ДАТЫ → чтобы не было дублей
-func normalizeText(s string) string {
-	s = strings.ToLower(s)
+func extractID(link string) string {
+	if link == "" {
+		return ""
+	}
 
-	// удалить часы (63, 64 и т.д.)
-	reHours := regexp.MustCompile(`\b\d{1,3}\b`)
-	s = reHours.ReplaceAllString(s, "")
-
-	// удалить дату
-	reDate := regexp.MustCompile(`\d{2}\s+\p{L}+\s+\d{2}:\d{2}`)
-	s = reDate.ReplaceAllString(s, "")
-
-	// удалить статус
-	s = strings.ReplaceAll(s, "ожидает проверки", "")
-	s = strings.ReplaceAll(s, "просмотрено", "")
-	s = strings.ReplaceAll(s, "проверено", "")
-
-	// убрать лишние пробелы
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
-
-	return strings.TrimSpace(s)
+	parts := strings.Split(link, "/")
+	return parts[len(parts)-1]
 }
 
 func makeHash(s string) string {
 	h := md5.Sum([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+func normalizeText(s string) string {
+	s = strings.ToLower(s)
+
+	// ❌ убираем "63", "64", "65" (часы)
+	reHours := regexp.MustCompile(`\b\d{1,3}\b`)
+	s = reHours.ReplaceAllString(s, "")
+
+	// ❌ убираем дату типа "04 мая 15:21"
+	reDate := regexp.MustCompile(`\d{2}\s+\p{L}+\s+\d{2}:\d{2}`)
+	s = reDate.ReplaceAllString(s, "")
+
+	// ❌ убираем статус
+	s = strings.ReplaceAll(s, "ожидает проверки", "")
+	s = strings.ReplaceAll(s, "проверено", "")
+
+	// ❌ убираем лишние пробелы
+	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+
+	return strings.TrimSpace(s)
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
@@ -162,12 +187,19 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Sleep(10*time.Second),
 
 		chromedp.Navigate(acc.HomeworkURL),
+
+		// ждём загрузку
 		chromedp.Sleep(15*time.Second),
 
 		// скролл
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			for i := 0; i < 5; i++ {
-				chromedp.Evaluate(`window.scrollBy(0, 1000);`, nil).Do(ctx)
+				chromedp.Evaluate(`
+     window.scrollBy(0, 1000);
+     document.querySelectorAll('*').forEach(el => {
+      if (el.scrollHeight > el.clientHeight) el.scrollTop += 1000;
+     });
+    `, nil).Do(ctx)
 				time.Sleep(2 * time.Second)
 			}
 			return nil
@@ -181,61 +213,64 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
   link: a ? a.getAttribute("href") : "",
   text: tr.innerText.replace(/\s+/g, ' ').trim()
  }
-}).filter(h => h.text.length > 20)
-`, &homeworks),
+}).filter(h => h.text.length > 10)
+  `, &homeworks),
 	)
-
 	if err != nil {
 		log.Printf("[%s] Ошибка: %v", acc.Name, err)
 		return
 	}
 
+	newFound := false
+	var msg []string
+
 	for _, hw := range homeworks {
 		txt := strings.ToLower(hw.Text)
 
-		isMath := strings.Contains(txt, "мат")
-		isProbnik := strings.Contains(txt, "пробник")
-		isPart := strings.Contains(txt, "часть")
+		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат")
+		isProbnik := strings.Contains(txt, "пробник") || strings.Contains(txt, "проб")
+		isPart := strings.Contains(txt, "часть") || strings.Contains(txt, "части")
 
 		if isMath && (isProbnik || isPart) {
 
 			finalLink := hw.Link
-			if finalLink == "" || strings.Contains(finalLink, "javascript") {
+			if finalLink == "" || finalLink == "#" || strings.Contains(finalLink, "javascript") {
 				finalLink = acc.HomeworkURL
 			} else if !strings.HasPrefix(finalLink, "http") {
 				finalLink = "https://pl.el-ed.ru" + finalLink
 			}
 
-			// 🔥 УНИКАЛЬНОСТЬ
-			clean := normalizeText(hw.Text)
-			hash := makeHash(clean)
-
+			// 🔥 ВАЖНО: уникальный ключ
+			cleanText := normalizeText(hw.Text)
+			base := cleanText
+			dbKey := makeHash(base)
 			res, err := db.Exec(`
-INSERT INTO saved_homeworks (account, hash)
+INSERT INTO saved_homeworks (account, link)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING
-`, acc.Name, hash)
-
+   `, acc.Name, dbKey)
 			if err != nil {
+				log.Printf("[%s] DB ошибка: %v", acc.Name, err)
 				continue
 			}
 
 			aff, _ := res.RowsAffected()
 
 			if aff > 0 {
-				// ✅ КАЖДАЯ РАБОТА ОТДЕЛЬНО
-				message := fmt.Sprintf(
-					"%s\n\n%s\n\n%s",
-					acc.Name,
-					hw.Text,
-					finalLink,
-				)
+				newFound = true
 
-				sendTelegram(message, acc.ChatID)
+				msg = append(msg,
+					"🔹 Найдена работа:\n"+hw.Text+"\n\nСсылка: "+finalLink)
 
-				log.Printf("[%s] ✅ Отправлено", acc.Name)
+				log.Printf("[%s] ✅ Новая работа добавлена", acc.Name)
 			}
 		}
+	}
+
+	if newFound {
+		sendTelegram("🔥 "+acc.Name+"\nНовые работы:\n\n"+strings.Join(msg, "\n\n---\n"), acc.ChatID)
+	} else {
+		log.Printf("[%s] Новых работ нет", acc.Name)
 	}
 }
 
