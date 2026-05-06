@@ -227,7 +227,7 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
 	for _, hw := range homeworks {
 		txt := strings.ToLower(hw.Text)
 
-		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат") || strings.Contains(txt, "русский ЕГЭ")
+		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат") || strings.Contains(txt, "русский ЕГЭ") || strings.Contains(txt, "рус") || strings.Contains(txt, "ЕГЭ")
 		isProbnik := strings.Contains(txt, "пробник") || strings.Contains(txt, "проб")
 		isPart := strings.Contains(txt, "часть") || strings.Contains(txt, "части")
 
