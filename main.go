@@ -101,8 +101,8 @@ func main() {
 				time.Sleep(10 * time.Second)
 			}
 
-			fmt.Println("⏸️ Ждем 10 минут...")
-			time.Sleep(10 * time.Minute)
+			fmt.Println("⏸️ Ждем 5 минут...")
+			time.Sleep(5 * time.Minute)
 		}
 	}
 }
