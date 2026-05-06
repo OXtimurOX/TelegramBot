@@ -80,7 +80,7 @@ func main() {
 	{
 		"2probnikm@mail.ru",
 		"goelprobe",
-		"AСЯЯЯ",
+		"AСЯ",
 		"https://pl.el-ed.ru/clan/5298/homeworks",
 		os.Getenv("TELEGRAM_CHAT_ID_2"), // 👈 второй человек
 	},
@@ -227,7 +227,7 @@ Array.from(document.querySelectorAll('tr')).map(tr => {
 	for _, hw := range homeworks {
 		txt := strings.ToLower(hw.Text)
 
-		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат")
+		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат") || strings.Contains(txt, "русский ЕГЭ")
 		isProbnik := strings.Contains(txt, "пробник") || strings.Contains(txt, "проб")
 		isPart := strings.Contains(txt, "часть") || strings.Contains(txt, "части")
 
