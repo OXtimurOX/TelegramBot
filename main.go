@@ -32,72 +32,104 @@ type Homework struct {
 }
 
 func main() {
-	// Порт для Railway
+	// чтобы Railway не убивал сервис
 	go func() {
 		port := os.Getenv("PORT")
-		if port == "" { port = "8080" }
+		if port == "" {
+			port = "8080"
+		}
 		http.ListenAndServe(":"+port, nil)
 	}()
 
 	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" { log.Fatal("DATABASE_URL is missing") }
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is missing")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 
-	// Таблица с уникальной связкой Аккаунт + Ссылка
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS saved_homeworks (
-			account VARCHAR(100),
-			link TEXT,
-			UNIQUE(account, link)
-		);`)
-	if err != nil { log.Fatal(err) }
-
-	// Настройки чатов
-	myID := os.Getenv("TELEGRAM_CHAT_ID")
-	otherID := os.Getenv("TELEGRAM_CHAT_ID_2")
+	CREATE TABLE IF NOT EXISTS saved_homeworks (
+		account VARCHAR(100),
+		hash TEXT,
+		UNIQUE(account, hash)
+	);
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	accounts := []Account{
-		{"6probnikm@mail.ru", "goelprobe", "МАША", "https://pl.el-ed.ru/clan/5294/homeworks", myID},
-		{"7probnikm@mail.ru", "goelprobe", "САША", "https://pl.el-ed.ru/clan/5293/homeworks", myID},
-		{"2probnikm@mail.ru", "goelprobe", "АСЯ", "https://pl.el-ed.ru/clan/5298/homeworks", otherID},
+		// 👉 эти два одному человеку
+		{"6probnikm@mail.ru", "goelprobe", "МАША", "https://pl.el-ed.ru/clan/5294/homeworks", "CHAT_ID_1"},
+		{"7probnikm@mail.ru", "goelprobe", "САША", "https://pl.el-ed.ru/clan/5293/homeworks", "CHAT_ID_1"},
+
+		// 👉 этот другому
+		{"2probnikm@mail.ru", "goelprobe", "АСЯ", "https://pl.el-ed.ru/clan/5298/homeworks", "CHAT_ID_2"},
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Headless,
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(1920, 1080),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
 	)
 
+	// ✅ один браузер
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancelAlloc()
+
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer cancelBrowser()
+
 	for {
-		allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+		fmt.Println("=== Старт проверки:", time.Now().Format("15:04:05"), "===")
 
 		for _, acc := range accounts {
 			ctx, cancel := chromedp.NewContext(browserCtx)
+
 			checkAccount(ctx, acc, db)
+
 			cancel()
+
 			time.Sleep(10 * time.Second)
 		}
-
-		cancelBrowser()
-		cancelAlloc()
 
 		fmt.Println("⏸️ Ждем 5 минут...")
 		time.Sleep(5 * time.Minute)
 	}
 }
 
+// 🔥 УБИРАЕМ ЧАСЫ / ДАТЫ → чтобы не было дублей
 func normalizeText(s string) string {
 	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, "undefined", "")
-	// Убираем лишние пробелы и мусор
-	re := regexp.MustCompile(`\s+`)
-	return strings.TrimSpace(re.ReplaceAllString(s, " "))
+
+	// удалить часы (63, 64 и т.д.)
+	reHours := regexp.MustCompile(`\b\d{1,3}\b`)
+	s = reHours.ReplaceAllString(s, "")
+
+	// удалить дату
+	reDate := regexp.MustCompile(`\d{2}\s+\p{L}+\s+\d{2}:\d{2}`)
+	s = reDate.ReplaceAllString(s, "")
+
+	// удалить статус
+	s = strings.ReplaceAll(s, "ожидает проверки", "")
+	s = strings.ReplaceAll(s, "просмотрено", "")
+	s = strings.ReplaceAll(s, "проверено", "")
+
+	// убрать лишние пробелы
+	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+
+	return strings.TrimSpace(s)
 }
 
 func makeHash(s string) string {
@@ -106,101 +138,126 @@ func makeHash(s string) string {
 }
 
 func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
-	timeCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	timeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	var homeworks []Homework
-	log.Printf("[%s] Начинаю проверку...", acc.Name)
+
+	log.Printf("[%s] Вхожу...", acc.Name)
 
 	err := chromedp.Run(timeCtx,
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(5*time.Second),
+
+		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
+		chromedp.Sleep(2*time.Second),
+
 		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
+		chromedp.WaitVisible(`input[type="email"]`),
+
 		chromedp.SendKeys(`input[type="email"]`, acc.Email),
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
-		chromedp.Sleep(8*time.Second),
-		chromedp.Navigate(acc.HomeworkURL),
+
 		chromedp.Sleep(10*time.Second),
-		// Скроллим таблицу вниз, чтобы подгрузить всё
-		chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight)`, nil),
-		chromedp.Sleep(3*time.Second),
-		// Парсим строки
+
+		chromedp.Navigate(acc.HomeworkURL),
+		chromedp.Sleep(15*time.Second),
+
+		// скролл
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			for i := 0; i < 5; i++ {
+				chromedp.Evaluate(`window.scrollBy(0, 1000);`, nil).Do(ctx)
+				time.Sleep(2 * time.Second)
+			}
+			return nil
+		}),
+
+		// парсинг
 		chromedp.Evaluate(`
-			Array.from(document.querySelectorAll('tr')).map(tr => {
-				let a = tr.querySelector('a');
-				return {
-					link: a ? a.getAttribute("href") : "",
-					text: tr.innerText
-				}
-			}).filter(h => h.text.length > 10)
-		`, &homeworks),
+Array.from(document.querySelectorAll('tr')).map(tr => {
+ let a = tr.querySelector('a');
+ return {
+  link: a ? a.getAttribute("href") : "",
+  text: tr.innerText.replace(/\s+/g, ' ').trim()
+ }
+}).filter(h => h.text.length > 20)
+`, &homeworks),
 	)
 
 	if err != nil {
-		log.Printf("[%s] Ошибка браузера: %v", acc.Name, err)
+		log.Printf("[%s] Ошибка: %v", acc.Name, err)
 		return
 	}
 
-	newFound := false
-	var msg []string
-
 	for _, hw := range homeworks {
-		txt := normalizeText(hw.Text)
+		txt := strings.ToLower(hw.Text)
 
-		// Фильтры (строго маленькими буквами!)
-		isMath := strings.Contains(txt, "математика") || strings.Contains(txt, "мат")
-		isProb := strings.Contains(txt, "пробник") || strings.Contains(txt, "проб")
+		isMath := strings.Contains(txt, "мат")
+		isProbnik := strings.Contains(txt, "пробник")
+		isPart := strings.Contains(txt, "часть")
 
-		if isMath || isProb {
-			// Формируем ссылку
+		if isMath && (isProbnik || isPart) {
+
 			finalLink := hw.Link
-			if finalLink == "" || finalLink == "#" || strings.Contains(finalLink, "javascript") {
+			if finalLink == "" || strings.Contains(finalLink, "javascript") {
 				finalLink = acc.HomeworkURL
 			} else if !strings.HasPrefix(finalLink, "http") {
 				finalLink = "https://pl.el-ed.ru" + finalLink
 			}
 
-			// Уникальный ключ для базы — ссылка на работу
-			dbKey := finalLink 
-			if dbKey == acc.HomeworkURL {
-				// Если ссылки нет, создаем ключ из хэша текста
-				dbKey = makeHash(acc.Name + txt)
-			}
+			// 🔥 УНИКАЛЬНОСТЬ
+			clean := normalizeText(hw.Text)
+			hash := makeHash(clean)
 
 			res, err := db.Exec(`
-				INSERT INTO saved_homeworks (account, link) 
-				VALUES ($1, $2) 
-				ON CONFLICT DO NOTHING`, acc.Name, dbKey)
-			
-			if err != nil { continue }
+INSERT INTO saved_homeworks (account, hash)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`, acc.Name, hash)
+
+			if err != nil {
+				continue
+			}
 
 			aff, _ := res.RowsAffected()
+
 			if aff > 0 {
-				newFound = true
-				cleanMsg := fmt.Sprintf("📝 *%s*\n🔗 [Открыть работу](%s)", hw.Text, finalLink)
-				msg = append(msg, cleanMsg)
+				// ✅ КАЖДАЯ РАБОТА ОТДЕЛЬНО
+				message := fmt.Sprintf(
+					"%s\n\n%s\n\n%s",
+					acc.Name,
+					hw.Text,
+					finalLink,
+				)
+
+				sendTelegram(message, acc.ChatID)
+
+				log.Printf("[%s] ✅ Отправлено", acc.Name)
 			}
 		}
 	}
-
-	if newFound {
-		botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-		text := "🔥 *" + acc.Name + "*\nНовые работы:\n\n" + strings.Join(msg, "\n\n---\n")
-		sendTelegram(botToken, acc.ChatID, text)
-		log.Printf("[%s] Отправлено уведомление", acc.Name)
-	} else {
-		log.Printf("[%s] Ничего нового", acc.Name)
-	}
 }
 
-func sendTelegram(token, chatID, message string) {
-	if token == "" || chatID == "" { return }
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	
-	http.PostForm(apiURL, url.Values{
-		"chat_id":    {chatID},
-		"text":       {message},
-		"parse_mode": {"Markdown"},
-	})
+func sendTelegram(message string, chatID string) {
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+
+	if botToken == "" || chatID == "" {
+		log.Println("Telegram env пустые")
+		return
+	}
+
+	apiURL := fmt.Sprintf(
+		"https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s",
+		botToken,
+		chatID,
+		url.QueryEscape(message),
+	)
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		log.Println("Telegram error:", err)
+		return
+	}
+	defer resp.Body.Close()
 }
