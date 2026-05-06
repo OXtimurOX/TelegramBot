@@ -62,8 +62,9 @@ func main() {
 	}
 
 	accounts := []Account{
-		{"6probnikm@mail.ru", "goelprobe", "Account1", "https://pl.el-ed.ru/clan/5294/homeworks"},
-		{"7probnikm@mail.ru", "goelprobe", "Account2", "https://pl.el-ed.ru/clan/5293/homeworks"},
+		{"6probnikm@mail.ru", "goelprobe", "МАША", "https://pl.el-ed.ru/clan/5294/homeworks"},
+		{"7probnikm@mail.ru", "goelprobe", "САША", "https://pl.el-ed.ru/clan/5293/homeworks"},
+		{"2probnikm@mail.ru", "goelprobe", "АСЯ", "https://pl.el-ed.ru/clan/5298/homeworks"},
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
