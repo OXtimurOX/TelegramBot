@@ -1,0 +1,21 @@
+name: Scheduled Railway Redeploy
+
+on:
+  schedule:
+    # Запуск каждые 5 часов (в 00:00, 05:00, 10:00 и т.д. по UTC)
+    - cron: '0 */1 * * *'
+  workflow_dispatch: # Позволяет запустить редеплой вручную в любое время
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Railway Service Redeploy
+        run: |
+          curl --request POST \
+          --url https://backboard.railway.app/graphql/v2 \
+          --header 'Authorization: Bearer ${{ secrets.RAILWAY_API_TOKEN1 }}' \
+          --header 'Content-Type: application/json' \
+          --data '{
+            "query": "mutation { serviceInstanceRedeploy(serviceId: \"'${{ secrets.RAILWAY_SERVICE_ID }}'\" ) }"
+          }'
