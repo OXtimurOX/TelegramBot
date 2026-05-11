@@ -63,28 +63,28 @@ func main() {
 	}
 
 	accounts := []Account{
-	{
-		"6probnikm@mail.ru",
-		"goelprobe",
-		"МАША",
-		"https://pl.el-ed.ru/clan/5294/homeworks",
-		os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 первый человек
-	},
-	{
-		"7probnikm@mail.ru",
-		"goelprobe",
-		"САША",
-		"https://pl.el-ed.ru/clan/5293/homeworks",
-		os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 второй человек
-	},
-	{
-		"2probnikm@mail.ru",
-		"goelprobe",
-		"AСЯ",
-		"https://pl.el-ed.ru/clan/5298/homeworks",
-		os.Getenv("TELEGRAM_CHAT_ID_2"), // 👈 второй человек
-	},
-}
+		{
+			"6probnikm@mail.ru",
+			"goelprobe",
+			"МАША",
+			"https://pl.el-ed.ru/clan/5294/homeworks",
+			os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 первый человек
+		},
+		{
+			"7probnikm@mail.ru",
+			"goelprobe",
+			"САША",
+			"https://pl.el-ed.ru/clan/5293/homeworks",
+			os.Getenv("TELEGRAM_CHAT_ID_1"), // 👈 второй человек
+		},
+		{
+			"2probnikm@mail.ru",
+			"goelprobe",
+			"AСЯ",
+			"https://pl.el-ed.ru/clan/5298/homeworks",
+			os.Getenv("TELEGRAM_CHAT_ID_2"), // 👈 второй человек
+		},
+	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
@@ -174,8 +174,18 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Navigate("https://pl.el-ed.ru/auth"),
 		chromedp.Sleep(10*time.Second),
 
-		chromedp.Click(`//button[contains(text(),"Понятно, согласен")]`, chromedp.BySearch, chromedp.AtLeast(0)),
-		chromedp.Sleep(2*time.Second),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			err := chromedp.Click(
+				`//button[contains(text(),"Понятно, согласен")]`,
+				chromedp.BySearch,
+			).Do(ctx)
+			// если кнопки нет — просто идем дальше
+			if err != nil {
+				log.Println("Кнопка согласия не найдена, пропускаем...")
+			}
+
+			return nil
+		}),
 
 		chromedp.Click(`//button[contains(., "Войти по почте")]`, chromedp.BySearch),
 		chromedp.WaitVisible(`input[type="email"]`),
