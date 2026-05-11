@@ -122,7 +122,7 @@ func main() {
 			}
 
 			fmt.Println("⏸️ Ждем 30 секунд...")
-			time.Sleep(30 * time.Second)
+			time.Sleep(15 * time.Second)
 		}
 	}
 }
@@ -196,12 +196,12 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
 
-		chromedp.Sleep(15*time.Second),
+		chromedp.Sleep(7*time.Second),
 
 		chromedp.Navigate(acc.HomeworkURL),
 
 		// ждём загрузку
-		chromedp.Sleep(15*time.Second),
+		chromedp.Sleep(7*time.Second),
 
 		// скролл
 		chromedp.ActionFunc(func(ctx context.Context) error {
