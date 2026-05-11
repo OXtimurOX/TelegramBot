@@ -175,11 +175,13 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.Sleep(10*time.Second),
 
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+
 			err := chromedp.Click(
 				`//button[contains(text(),"Понятно, согласен")]`,
 				chromedp.BySearch,
-			).Do(ctx)
-			// если кнопки нет — просто идем дальше
+			).Do(ctx2)
 			if err != nil {
 				log.Println("Кнопка согласия не найдена, пропускаем...")
 			}
