@@ -121,8 +121,8 @@ func main() {
 				time.Sleep(10 * time.Second)
 			}
 
-			fmt.Println("⏸️ Ждем 5 минут...")
-			time.Sleep(5 * time.Minute)
+			fmt.Println("⏸️ Ждем 30 секунд...")
+			time.Sleep(30 * time.Second)
 		}
 	}
 }
@@ -184,7 +184,7 @@ func checkAccount(ctx context.Context, acc Account, db *sql.DB) {
 		chromedp.SendKeys(`input[type="password"]`, acc.Password),
 		chromedp.Click(`button[type="submit"]`),
 
-		chromedp.Sleep(10*time.Second),
+		chromedp.Sleep(15*time.Second),
 
 		chromedp.Navigate(acc.HomeworkURL),
 
